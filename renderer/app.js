@@ -129,7 +129,7 @@
       await reloadXrefs();
       await rebuild(false);
       $('#docname').textContent = p;
-      document.title = `${r.name} — DWG 뷰어`;
+      document.title = r.name; // macOS 탭 이름
       $('#empty').hidden = true;
       const miss = S.xrefs.filter((x) => x.status !== 'ok').length;
       if (miss) hint(`XREF ${miss}개를 찾지 못했습니다. 오른쪽 XREF 탭에서 파일을 지정할 수 있습니다.`, 6000);
@@ -967,7 +967,10 @@
 
   // ───────────────────────── 키보드 ─────────────────────────
   window.addEventListener('keydown', (ev) => {
-    const typing = ev.target.tagName === 'INPUT';
+    // 글자를 치는 입력칸에서만 단축키를 끈다 (체크박스·버튼 포커스는 해당 안 됨)
+    const tg = ev.target;
+    const typing = tg.isContentEditable || tg.tagName === 'TEXTAREA' || tg.tagName === 'SELECT' ||
+      (tg.tagName === 'INPUT' && !['checkbox', 'radio', 'button', 'range', 'color'].includes(tg.type));
     if (ev.key === 'Escape') {
       if (!$('#modal').hidden) { $('#modal').hidden = true; return; }
       if (!$('#pmodal').hidden) { $('#pmodal').hidden = true; return; }
@@ -977,8 +980,9 @@
       return;
     }
     if (typing || ev.metaKey || ev.ctrlKey || !$('#pmodal').hidden || !$('#modal').hidden) return;
-    const k = ev.key.toLowerCase();
-    if (k === ' ') { spaceDown = true; ui.classList.add('pan'); ev.preventDefault(); }
+    // 한글 입력 상태에서도 되도록 글자 대신 물리 키(KeyD 등)로 판단
+    const k = /^Key[A-Z]$/.test(ev.code) ? ev.code.slice(3).toLowerCase() : ev.code === 'Space' ? ' ' : ev.key.toLowerCase();
+    if (k === ' ') { spaceDown = true; ui.classList.add('pan'); ev.preventDefault(); if (tg.blur && tg !== document.body) tg.blur(); }
     else if (k === 'f') view.zoomExtents();
     else if (k === 'd') setTool('dist');
     else if (k === 'a') setTool('area');
@@ -987,7 +991,7 @@
     else if ((k === 'backspace' || k === 'delete') && S.measures.length && !S.cur.length) { S.measures.pop(); renderMeasures(); drawUI(); }
   });
   window.addEventListener('keyup', (ev) => {
-    if (ev.key === ' ') { spaceDown = false; ui.classList.toggle('pan', S.tool === 'pan'); }
+    if (ev.code === 'Space' || ev.key === ' ') { spaceDown = false; ui.classList.toggle('pan', S.tool === 'pan'); }
   });
 
   // ───────────────────────── 버튼/메뉴 ─────────────────────────
@@ -1040,11 +1044,9 @@
     ev.preventDefault();
     empty.classList.remove('drag');
     empty.hidden = !!S.scene;
-    const f = ev.dataTransfer.files[0];
-    if (!f) return;
-    const p = window.api.pathForFile(f);
-    if (/\.(dwg|dxf)$/i.test(p)) openPath(p);
-    else hint('DWG 또는 DXF 파일만 열 수 있습니다', 3000);
+    const ps = [...ev.dataTransfer.files].map((f) => window.api.pathForFile(f)).filter((p) => /\.(dwg|dxf)$/i.test(p));
+    if (!ps.length) { if (ev.dataTransfer.files.length) hint('DWG 또는 DXF 파일만 열 수 있습니다', 3000); return; }
+    ps.forEach((p) => window.api.openInTab(p)); // 열린 도면이 있으면 새 탭으로
   });
 
   new ResizeObserver(() => { view.resize(); drawUI(); }).observe($('#stage'));

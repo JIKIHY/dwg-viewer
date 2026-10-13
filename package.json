@@ -1,7 +1,7 @@
 {
   "name": "dwg-viewer",
   "productName": "DWG 뷰어",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Mac용 DWG/DXF 뷰어 (LibreDWG 기반)",
   "main": "main.js",
   "scripts": {

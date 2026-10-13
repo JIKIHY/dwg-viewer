@@ -126,7 +126,9 @@ function addRecent(p) {
 }
 
 // ───────────────────────── 창 / 메뉴 ─────────────────────────
-function createWindow(fileToOpen) {
+// 창(탭)마다 열린 도면 경로. 도면 하나 = macOS 탭 하나
+const winPaths = new Map();
+function createWindow(fileToOpen, tabOf) {
   const win = new BrowserWindow({
     width: 1440,
     height: 920,
@@ -136,10 +138,16 @@ function createWindow(fileToOpen) {
     title: 'DWG 뷰어',
     show: !process.env.DWGV_TEST_OPEN,
     paintWhenInitiallyHidden: true,
+    tabbingIdentifier: 'dwg-viewer',
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
   });
+  if (tabOf && !tabOf.isDestroyed()) tabOf.addTabbedWindow(win);
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
-  if (fileToOpen) win.webContents.once('did-finish-load', () => win.webContents.send('open-path', fileToOpen));
+  if (fileToOpen) {
+    winPaths.set(win, fileToOpen);
+    win.webContents.once('did-finish-load', () => win.webContents.send('open-path', fileToOpen));
+  }
+  win.on('closed', () => winPaths.delete(win));
   return win;
 }
 
@@ -150,16 +158,29 @@ function sendToFocused(channel, ...args) {
 
 async function openViaDialog() {
   const r = await dialog.showOpenDialog({
-    properties: ['openFile'],
+    properties: ['openFile', 'multiSelections'],
     filters: [{ name: 'CAD 도면', extensions: ['dwg', 'dxf'] }],
   });
-  if (!r.canceled && r.filePaths[0]) openPath(r.filePaths[0]);
+  if (!r.canceled) r.filePaths.forEach((p) => openPath(p));
 }
 
+function openPathIn(win, p) {
+  p = path.resolve(p);
+  if ([...winPaths.values()].includes(p)) return;
+  createWindow(p, win);
+}
+
+// 이미 열린 도면이면 그 탭으로, 빈 창이면 거기서, 아니면 새 탭으로 연다
 function openPath(p) {
+  p = path.resolve(p);
+  for (const [w, q] of winPaths) {
+    if (q === p && !w.isDestroyed()) { w.show(); w.focus(); return; }
+  }
   const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
-  if (win) win.webContents.send('open-path', p);
-  else createWindow(p);
+  if (win && !winPaths.has(win)) {
+    winPaths.set(win, p);
+    win.webContents.send('open-path', p);
+  } else createWindow(p, win);
 }
 
 function buildMenu() {
@@ -177,6 +198,7 @@ function buildMenu() {
             ? recent.map((p) => ({ label: path.basename(p), click: () => openPath(p) }))
             : [{ label: '(없음)', enabled: false }],
         },
+        { label: '새 탭', accelerator: 'CmdOrCtrl+T', click: () => createWindow(null, BrowserWindow.getFocusedWindow()) },
         { label: '새 창', accelerator: 'CmdOrCtrl+N', click: () => createWindow() },
         { type: 'separator' },
         { label: 'XREF 부착…', accelerator: 'CmdOrCtrl+Shift+X', click: cmd('attach-xref') },
@@ -185,7 +207,7 @@ function buildMenu() {
         { label: '인쇄 / PDF…', accelerator: 'CmdOrCtrl+P', click: cmd('print') },
         { label: '현재 화면 PNG로 저장…', accelerator: 'CmdOrCtrl+Shift+S', click: cmd('save-png') },
         { type: 'separator' },
-        { role: 'close', label: '창 닫기' },
+        { role: 'close', label: '탭 닫기' },
       ],
     },
     {
@@ -210,6 +232,7 @@ function buildMenu() {
 
 // ───────────────────────── IPC ─────────────────────────
 ipcMain.handle('open-dialog', () => openViaDialog());
+ipcMain.handle('open-path', (_e, p) => openPath(p));
 ipcMain.handle('pick-drawing', async (_e, title) => {
   const r = await dialog.showOpenDialog({
     title: title || '도면 선택',
@@ -357,6 +380,7 @@ app.whenReady().then(() => {
         const r = await win.webContents.executeJavaScript(process.env.DWGV_TEST_JS).catch((err) => 'JS 오류: ' + err.message);
         console.log('[test-js]', typeof r === 'string' ? r : JSON.stringify(r));
         await new Promise((res) => setTimeout(res, 800));
+        console.log('[test-tabs]', [...winPaths.values()].map((q) => path.basename(q)).join(' | '), '· 창', BrowserWindow.getAllWindows().length);
       }
       const img = await win.webContents.capturePage();
       fs.writeFileSync(process.env.DWGV_TEST_SHOT || '/tmp/dwgv.png', img.toPNG());
@@ -364,8 +388,10 @@ app.whenReady().then(() => {
     }, +(process.env.DWGV_TEST_WAIT || 8000));
     return;
   }
-  if (pendingOpen.length) pendingOpen.forEach((p) => createWindow(p));
-  else createWindow();
+  if (pendingOpen.length) {
+    const first = createWindow(path.resolve(pendingOpen[0]));
+    pendingOpen.slice(1).forEach((p) => openPathIn(first, p));
+  } else createWindow();
   pendingOpen = [];
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

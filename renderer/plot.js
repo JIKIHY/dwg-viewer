@@ -87,9 +87,72 @@
   const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const r2 = (v) => Math.round(v * 100) / 100;
 
+  // 측정 치수 → 용지(mm) 위 선·화살표·문자. dims: [{ a, b, off, label }] (월드 좌표)
+  const DIM = { txt: 2.5, arrow: 2.5, gap: 0.6, ext: 1.5, lw: 0.18 };
+  function dimPrims(dims, toPaper) {
+    const lines = [], tris = [], texts = [];
+    for (const d of dims) {
+      const [a, b] = d.pts;
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (!(L > 0)) continue;
+      const o = d.off || 0, n = [-(b[1] - a[1]) / L, (b[0] - a[0]) / L];
+      const pa = toPaper(a), pb = toPaper(b);
+      const qa = toPaper([a[0] + n[0] * o, a[1] + n[1] * o]), qb = toPaper([b[0] + n[0] * o, b[1] + n[1] * o]);
+      const sl = Math.hypot(qb[0] - qa[0], qb[1] - qa[1]);
+      const ux = (qb[0] - qa[0]) / sl, uy = (qb[1] - qa[1]) / sl;
+      let nx = -uy, ny = ux;
+      const od = Math.hypot(qa[0] - pa[0], qa[1] - pa[1]);
+      if (od > 1e-9 ? nx * (qa[0] - pa[0]) + ny * (qa[1] - pa[1]) < 0 : ny > 0) { nx = -nx; ny = -ny; }
+      lines.push([qa[0], qa[1], qb[0], qb[1]]);
+      for (const [p, q] of [[pa, qa], [pb, qb]]) {
+        const s0 = od > DIM.gap ? DIM.gap : -DIM.ext;
+        lines.push([p[0] + nx * s0, p[1] + ny * s0, q[0] + nx * DIM.ext, q[1] + ny * DIM.ext]);
+      }
+      const AL = DIM.arrow, AW = AL / 6;
+      for (const [p, s] of [[qa, 1], [qb, -1]]) {
+        tris.push([p[0], p[1], p[0] + ux * AL * s - uy * AW, p[1] + uy * AL * s + ux * AW, p[0] + ux * AL * s + uy * AW, p[1] + uy * AL * s - ux * AW]);
+      }
+      // 문자: 치수선 가운데, 바깥쪽에, 읽기 방향으로
+      // ang: 용지에서 반시계 방향 각도 (용지 y는 아래로)
+      let ang = (Math.atan2(-uy, ux) * 180) / Math.PI;
+      if (ang > 90.01) ang -= 180; else if (ang < -89.99) ang += 180;
+      const ra = (ang * Math.PI) / 180, g = DIM.txt * 0.35;
+      // 문자의 '위' 방향이 바깥쪽이면 기준선 정렬, 반대면 윗선 정렬
+      const below = -Math.sin(ra) * nx - Math.cos(ra) * ny < 0;
+      texts.push({ x: (qa[0] + qb[0]) / 2 + nx * g, y: (qa[1] + qb[1]) / 2 + ny * g, ang, s: d.label, below });
+    }
+    return { lines, tris, texts };
+  }
+  function dimSvg(pr) {
+    if (!pr.lines.length) return '';
+    const d = pr.lines.map((l) => `M${r2(l[0])} ${r2(l[1])}L${r2(l[2])} ${r2(l[3])}`).join('');
+    const t = pr.tris.map((v) => `M${r2(v[0])} ${r2(v[1])}L${r2(v[2])} ${r2(v[3])}L${r2(v[4])} ${r2(v[5])}Z`).join('');
+    const tx = pr.texts.map((x) => `<text transform="translate(${r2(x.x)} ${r2(x.y)}) rotate(${r2(-x.ang)})" dominant-baseline="${x.below ? 'hanging' : 'alphabetic'}">${esc(x.s)}</text>`).join('');
+    return `<g><path fill="none" stroke="#000" stroke-width="${DIM.lw}" stroke-linecap="round" d="${d}"/><path fill="#000" d="${t}"/>` +
+      `<g fill="#000" font-family="${Scene.FONT.replace(/"/g, "'")}" font-size="${DIM.txt}" text-anchor="middle">${tx}</g></g>`;
+  }
+  // 이미지 방식 용지에 그리기 (k: px/mm)
+  function drawDims(c, pr, k) {
+    c.save();
+    c.scale(k, k);
+    c.strokeStyle = '#000'; c.fillStyle = '#000'; c.lineWidth = DIM.lw; c.lineCap = 'round';
+    c.beginPath();
+    for (const l of pr.lines) { c.moveTo(l[0], l[1]); c.lineTo(l[2], l[3]); }
+    c.stroke();
+    for (const v of pr.tris) { c.beginPath(); c.moveTo(v[0], v[1]); c.lineTo(v[2], v[3]); c.lineTo(v[4], v[5]); c.closePath(); c.fill(); }
+    c.font = `${DIM.txt}px ${Scene.FONT}`;
+    c.textAlign = 'center';
+    for (const x of pr.texts) {
+      c.save(); c.translate(x.x, x.y); c.rotate((-x.ang * Math.PI) / 180);
+      c.textBaseline = x.below ? 'top' : 'alphabetic';
+      c.fillText(x.s, 0, 0); c.restore();
+    }
+    c.restore();
+  }
+
   // 용지 SVG (단위 mm). L: 용지 배치, vis(layer, group): 표시 여부
   function buildSvg(scene, L, opt) {
-    const { styler, vis, margin } = opt;
+    const { styler, vis, margin, dims } = opt;
     const k = L.mmPerUnit;
     const cx = (L.rg[0] + L.rg[2]) / 2, cy = (L.rg[1] + L.rg[3]) / 2;
     const px0 = margin + L.iw / 2, py0 = margin + L.ih / 2;
@@ -168,9 +231,10 @@
     const sorted = [...strokes.values()].sort((a, b) => a.st.mm - b.st.mm);
     for (const g of sorted) parts.push(`<path fill="none" stroke="${g.st.hex}" stroke-width="${g.st.mm}" stroke-linecap="round" stroke-linejoin="round" d="${g.d.join('')}"/>`);
     parts.push(`<g font-family="${Scene.FONT.replace(/"/g, "'")}" font-size="${Scene.EM}" xml:space="preserve">${texts.join('')}</g>`);
+    if (dims && dims.length) parts.push(dimSvg(dimPrims(dims, (p) => [px0 + (p[0] - cx) * k, py0 - (p[1] - cy) * k])));
     parts.push('</g></svg>');
     return { svg: parts.join('\n'), segCount, textCount: texts.length };
   }
 
-  global.Plot = { parseCtb, BUILTIN, makeStyler, buildSvg };
+  global.Plot = { parseCtb, BUILTIN, makeStyler, buildSvg, dimPrims, drawDims };
 })(window);

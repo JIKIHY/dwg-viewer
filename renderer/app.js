@@ -375,12 +375,17 @@
     updatePrintPreview();
   };
 
+  // 인쇄할 거리 치수 (측정 패널의 거리 측정들)
+  function printDims() {
+    if (!$('#p-dims').checked) return [];
+    return S.measures.filter((m) => m.type === 'dist').map((m) => ({ pts: m.pts, off: m.off || 0, label: measureInfo(m).label }));
+  }
   // 벡터 용지(SVG) 만들기. 선이 너무 많으면 고해상도 이미지로 대체
   const VECTOR_LIMIT = 1500000;
   async function buildPlot(L) {
     const ctb = await getCtb($('#p-ctb').value);
     const styler = Plot.makeStyler(ctb, $('#p-lw').checked, (S.mainDoc.lwdefault > 0 ? S.mainDoc.lwdefault : 25) / 100);
-    const r = Plot.buildSvg(S.scene, L, { styler, vis: (l, g) => view.isVisible(l, g), margin: MARGIN });
+    const r = Plot.buildSvg(S.scene, L, { styler, vis: (l, g) => view.isVisible(l, g), margin: MARGIN, dims: printDims() });
     return { ...r, raster: r.segCount > VECTOR_LIMIT };
   }
   // 이미지 방식(대용량 대비)
@@ -409,6 +414,14 @@
     c.fillRect(0, 0, pw, ph);
     c.drawImage(gc, m, m);
     c.drawImage(tc, m, m);
+    const dims = printDims();
+    if (dims.length) {
+      const cx = v.cx, cy = v.cy, px0 = MARGIN + L.iw / 2, py0 = MARGIN + L.ih / 2, km = L.mmPerUnit;
+      c.save();
+      c.beginPath(); c.rect(m, m, iw, ih); c.clip();
+      Plot.drawDims(c, Plot.dimPrims(dims, (p) => [px0 + (p[0] - cx) * km, py0 - (p[1] - cy) * km]), k);
+      c.restore();
+    }
     const lose = v.gl.getExtension('WEBGL_lose_context');
     if (lose) lose.loseContext();
     return out;
@@ -498,7 +511,7 @@
     }
     setLoading(false);
   }
-  ['#p-range', '#p-paper', '#p-orient', '#p-scale', '#p-n', '#p-lw'].forEach((sel) => $(sel).addEventListener('input', updatePrintPreview));
+  ['#p-range', '#p-paper', '#p-orient', '#p-scale', '#p-n', '#p-lw', '#p-dims'].forEach((sel) => $(sel).addEventListener('input', updatePrintPreview));
   $('#p-pickwin').onclick = pickPrintWindow;
   $('#p-cancel').onclick = () => { $('#pmodal').hidden = true; };
   $('#p-pdf').onclick = () => doPrint('pdf');
@@ -559,6 +572,33 @@
     const conv = { 4: 1e6, 5: 1e4, 6: 1, 1: 1550.0031, 2: 10.7639 }[u];
     if (conv) return `${fmt(a / conv, 3)} m²`;
     return `${fmt(a)} (도면단위²)`;
+  }
+  // 거리 치수: 측정점 a·b와 수직 간격 off(월드)로 치수선 위치를 정한다 (AutoCAD 평행 치수처럼)
+  function dimNormal(m) {
+    const [a, b] = m.pts;
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+    return [-(b[1] - a[1]) / L, (b[0] - a[0]) / L];
+  }
+  function dimScreen(m) {
+    const [a, b] = m.pts, n = dimNormal(m), o = m.off || 0;
+    return {
+      a: view.toScreen(a[0], a[1]), b: view.toScreen(b[0], b[1]),
+      da: view.toScreen(a[0] + n[0] * o, a[1] + n[1] * o), db: view.toScreen(b[0] + n[0] * o, b[1] + n[1] * o),
+    };
+  }
+  // 화면 좌표 근처의 거리 치수(치수선 또는 숫자) 번호, 없으면 -1
+  function hitDim(sx, sy) {
+    for (let i = S.measures.length - 1; i >= 0; i--) {
+      const m = S.measures[i];
+      if (m.type !== 'dist') continue;
+      const { da, db } = dimScreen(m);
+      const dx = db[0] - da[0], dy = db[1] - da[1], L2 = dx * dx + dy * dy;
+      const t = L2 > 0 ? Math.max(0, Math.min(1, ((sx - da[0]) * dx + (sy - da[1]) * dy) / L2)) : 0;
+      if (Math.hypot(da[0] + dx * t - sx, da[1] + dy * t - sy) < 6) return i;
+      const mx = (da[0] + db[0]) / 2, my = (da[1] + db[1]) / 2 - 14;
+      if (Math.abs(sx - mx) < 40 && Math.abs(sy - my) < 12) return i;
+    }
+    return -1;
   }
   function measureInfo(m) {
     if (m.type === 'dist') {
@@ -706,7 +746,42 @@
       c.textAlign = 'center'; c.textBaseline = 'middle';
       c.fillText(text, x, y + 1);
     };
+    const drawDim = (m, live) => {
+      const { a, b, da, db } = dimScreen(m);
+      const sl = Math.hypot(db[0] - da[0], db[1] - da[1]) || 1;
+      // 화면상 치수선의 법선과, 측정점→치수선 방향
+      let nx = -(db[1] - da[1]) / sl, ny = (db[0] - da[0]) / sl;
+      const ox = da[0] - a[0], oy = da[1] - a[1], od = Math.hypot(ox, oy);
+      if (od > 1e-6 && nx * ox + ny * oy < 0) { nx = -nx; ny = -ny; }
+      const GAP = 3, EXT = 6;
+      c.strokeStyle = acc; c.lineWidth = 1.6;
+      c.setLineDash(live ? [6, 4] : []);
+      c.beginPath(); c.moveTo(da[0], da[1]); c.lineTo(db[0], db[1]); c.stroke();
+      c.setLineDash([]);
+      // 양 끝 보조선(치수보조선): 측정점 근처에서 치수선 너머까지
+      c.lineWidth = 1;
+      c.beginPath();
+      for (const [p, d] of [[a, da], [b, db]]) {
+        const s0 = od > GAP ? GAP : -EXT;
+        c.moveTo(p[0] + nx * s0, p[1] + ny * s0);
+        c.lineTo(d[0] + nx * EXT, d[1] + ny * EXT);
+      }
+      c.stroke();
+      // 치수선 양 끝 화살표
+      const ux = (db[0] - da[0]) / sl, uy = (db[1] - da[1]) / sl, AL = 9, AW = 2.5;
+      c.fillStyle = acc;
+      for (const [p, s] of [[da, 1], [db, -1]]) {
+        c.beginPath();
+        c.moveTo(p[0], p[1]);
+        c.lineTo(p[0] + ux * AL * s - uy * AW, p[1] + uy * AL * s + ux * AW);
+        c.lineTo(p[0] + ux * AL * s + uy * AW, p[1] + uy * AL * s - ux * AW);
+        c.closePath(); c.fill();
+      }
+      for (const p of [a, b]) { c.beginPath(); c.arc(p[0], p[1], 2.5, 0, Math.PI * 2); c.fill(); }
+      label((da[0] + db[0]) / 2, (da[1] + db[1]) / 2 - 14, measureInfo(m).label);
+    };
     const drawMeasure = (m, live) => {
+      if (m.type === 'dist') { drawDim(m, live); return; }
       c.strokeStyle = acc; c.fillStyle = fill; c.lineWidth = 1.6;
       const pts = m.pts.map(sp);
       c.beginPath();
@@ -716,9 +791,7 @@
       c.stroke();
       c.setLineDash([]);
       for (const p of pts) { c.beginPath(); c.arc(p[0], p[1], 3, 0, Math.PI * 2); c.fillStyle = acc; c.fill(); }
-      if (m.type === 'dist' && pts.length === 2) {
-        label((pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2 - 14, measureInfo(m).label);
-      } else if (m.type === 'area' && pts.length >= 3) {
+      if (pts.length >= 3) {
         const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length, cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
         label(cx, cy, measureInfo(m).label);
       }
@@ -802,6 +875,17 @@
   ui.addEventListener('mousedown', (ev) => {
     if (!S.scene) return;
     const p = pointerWorld(ev);
+    if (ev.button === 0 && !spaceDown && !S.cur.length && (S.tool === 'pan' || S.tool === 'dist')) {
+      const i = hitDim(p.sx, p.sy);
+      if (i >= 0) {
+        const m = S.measures[i], n = dimNormal(m);
+        const [wx, wy] = view.toWorld(p.sx, p.sy);
+        drag = { mode: 'dim', m, grab: (m.off || 0) - ((wx - m.pts[0][0]) * n[0] + (wy - m.pts[0][1]) * n[1]) };
+        S.snap = null;
+        ev.preventDefault();
+        return;
+      }
+    }
     if (ev.button === 1 || ev.button === 2 && S.tool !== 'area' || (ev.button === 0 && (S.tool === 'pan' || spaceDown))) {
       drag = { mode: 'pan', lx: ev.clientX, ly: ev.clientY };
       ui.classList.add('panning');
@@ -836,8 +920,19 @@
       drag.lx = ev.clientX; drag.ly = ev.clientY;
       return;
     }
+    if (drag && drag.mode === 'dim') {
+      const r = ui.getBoundingClientRect();
+      const [wx, wy] = view.toWorld(ev.clientX - r.left, ev.clientY - r.top);
+      const m = drag.m, n = dimNormal(m);
+      m.off = drag.grab + (wx - m.pts[0][0]) * n[0] + (wy - m.pts[0][1]) * n[1];
+      drawUI();
+      return;
+    }
     if (!S.scene || (ev.target !== ui && !drag)) return;
     const p = pointerWorld(ev);
+    const canGrab = !drag && !spaceDown && !S.cur.length && (S.tool === 'pan' || S.tool === 'dist') && hitDim(p.sx, p.sy) >= 0;
+    ui.style.cursor = canGrab ? 'move' : '';
+    if (canGrab) S.snap = null;
     S.mouse = [p.wx, p.wy];
     $('#coords').textContent = `X: ${fmt(p.wx, 3)}   Y: ${fmt(p.wy, 3)}`;
     if (drag && drag.mode === 'zoomwin') drag.cur = [p.sx, p.sy];

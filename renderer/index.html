@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:" />
+  <title>DWG 뷰어</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header id="toolbar">
+    <button id="btn-open" title="열기 (⌘O)">📂 열기</button>
+    <span class="sep"></span>
+    <button data-tool="pan" class="tool active" title="이동 (Esc) — 드래그로 이동, 휠로 확대·축소">✋ 이동</button>
+    <button data-tool="zoomwin" class="tool" title="창 확대 (Z) — 드래그한 영역 확대">🔍 창 확대</button>
+    <button id="btn-extents" title="전체 보기 (F)">⤢ 전체</button>
+    <span class="sep"></span>
+    <button data-tool="dist" class="tool" title="거리 측정 (D)">📏 거리</button>
+    <button data-tool="area" class="tool" title="면적 측정 (A) — 클릭으로 점 추가, 더블클릭/Enter로 완료">⬠ 면적</button>
+    <button id="btn-clear" title="측정 지우기">🧹 측정 지우기</button>
+    <span class="sep"></span>
+    <button id="btn-xref" title="XREF 부착 (⌘⇧X)">📎 XREF 부착</button>
+    <button id="btn-bg" title="배경 전환 (⌘B)">◐ 배경</button>
+    <button id="btn-png" title="화면 저장 (⌘⇧S)">📷 PNG</button>
+    <button id="btn-print" title="인쇄 / PDF (⌘P)">🖨 인쇄</button>
+    <span class="sep"></span>
+    <button id="btn-panel" class="active" title="오른쪽 패널 숨기기/보이기 (⌘\)">▤ 패널</button>
+    <span id="docname"></span>
+  </header>
+
+  <main>
+    <div id="stage">
+      <canvas id="gl"></canvas>
+      <canvas id="text"></canvas>
+      <canvas id="ui"></canvas>
+      <div id="empty">
+        <div class="big">DWG / DXF 파일을 여기에 끌어다 놓으세요</div>
+        <div>또는 <b>⌘O</b> 로 열기</div>
+        <div id="conv-warn" hidden>⚠️ DWG 변환기가 없습니다. 터미널에서 <code>brew install libredwg</code> 실행 후 다시 시작하세요.</div>
+      </div>
+      <div id="loading" hidden><div class="spinner"></div><div id="loading-msg">불러오는 중…</div></div>
+      <div id="hint"></div>
+    </div>
+
+    <aside id="panel">
+      <nav id="tabs">
+        <button data-tab="layers" class="active">레이어</button>
+        <button data-tab="xrefs">XREF</button>
+        <button data-tab="measure">측정</button>
+        <button data-tab="search">검색</button>
+      </nav>
+      <section id="tab-layers" class="tab active">
+        <div class="row">
+          <input id="layer-filter" type="search" placeholder="레이어 이름 검색" />
+        </div>
+        <div class="row">
+          <button id="layers-all-on">모두 켜기</button>
+          <button id="layers-all-off">모두 끄기</button>
+          <button id="layers-invert">반전</button>
+        </div>
+        <ul id="layer-list" class="list"></ul>
+      </section>
+      <section id="tab-xrefs" class="tab">
+        <p class="note">도면에 걸린 외부참조는 자동으로 찾아 붙입니다. 못 찾은 XREF는 <b>파일 지정</b>으로 연결하세요.</p>
+        <ul id="xref-list" class="list"></ul>
+        <div class="row"><button id="btn-xref2">📎 다른 도면 겹쳐 붙이기…</button></div>
+      </section>
+      <section id="tab-measure" class="tab">
+        <ul id="measure-list" class="list"></ul>
+        <p class="note">스냅: □ 끝점 · △ 중간점 · ○ 중심 · ◇ 사분점 · ⨯ 선 위 근처점<br />Shift 를 누르면 수평/수직으로 고정됩니다.</p>
+      </section>
+      <section id="tab-search" class="tab">
+        <div class="row"><input id="search-input" type="search" placeholder="도면 안의 문자 검색 (예: 기둥, C1, 2400)" /></div>
+        <ul id="search-list" class="list"></ul>
+      </section>
+    </aside>
+  </main>
+
+  <footer id="status">
+    <span id="coords">X: — Y: —</span>
+    <span class="sep"></span>
+    <label><input type="checkbox" id="snap-end" checked /> 끝점</label>
+    <label><input type="checkbox" id="snap-mid" checked /> 중간점</label>
+    <label><input type="checkbox" id="snap-cen" checked /> 중심</label>
+    <label><input type="checkbox" id="snap-near" checked /> 근처점</label>
+    <span class="sep"></span>
+    <label title="트랙패드: 두 손가락 스크롤=이동, 핀치=확대·축소"><input type="checkbox" id="trackpad" /> 트랙패드 모드</label>
+    <span class="grow"></span>
+    <span id="units"></span>
+    <span id="info"></span>
+  </footer>
+
+  <div id="modal" hidden>
+    <div class="box">
+      <h3>XREF 부착</h3>
+      <div id="modal-file"></div>
+      <div class="grid">
+        <label>삽입점 X <input id="xa-x" type="number" value="0" /></label>
+        <label>삽입점 Y <input id="xa-y" type="number" value="0" /></label>
+        <label>축척 <input id="xa-s" type="number" value="1" step="any" /></label>
+        <label>회전(°) <input id="xa-r" type="number" value="0" step="any" /></label>
+      </div>
+      <div class="row right">
+        <button id="xa-pick">화면에서 삽입점 지정</button>
+        <span class="grow"></span>
+        <button id="xa-cancel">취소</button>
+        <button id="xa-ok" class="primary">부착</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="pmodal" hidden>
+    <div class="box wide">
+      <h3>인쇄 (플롯)</h3>
+      <div class="pgrid">
+        <div class="popts">
+          <label>인쇄 범위
+            <select id="p-range">
+              <option value="window">윈도우</option>
+              <option value="view">현재 화면</option>
+              <option value="extents">전체 도면</option>
+            </select>
+          </label>
+          <button id="p-pickwin">◻ 윈도우 지정 &lt;</button>
+          <div id="p-wininfo" class="note"></div>
+          <label>용지
+            <select id="p-paper">
+              <option value="A4">A4 (210×297)</option>
+              <option value="A3" selected>A3 (297×420)</option>
+              <option value="A2">A2 (420×594)</option>
+              <option value="A1">A1 (594×841)</option>
+            </select>
+          </label>
+          <label>방향
+            <select id="p-orient">
+              <option value="auto">자동</option>
+              <option value="landscape">가로</option>
+              <option value="portrait">세로</option>
+            </select>
+          </label>
+          <label>축척
+            <select id="p-scale">
+              <option value="fit">용지에 맞춤</option>
+              <option value="custom">1 : N 지정</option>
+            </select>
+          </label>
+          <label id="p-nrow" hidden>1 : <input id="p-n" type="number" value="100" min="1" step="any" /></label>
+          <label>플롯 스타일 (CTB)
+            <div class="row">
+              <select id="p-ctb" style="flex:1;min-width:0"></select>
+              <button id="p-ctb-add" title="오토캐드 CTB 파일을 골라 등록합니다. 등록한 파일은 앱이 기억합니다.">파일 선택…</button>
+            </div>
+          </label>
+          <div id="p-ctbinfo" class="note"></div>
+          <label class="chk"><input type="checkbox" id="p-lw" checked /> 선가중치 출력</label>
+        </div>
+        <div class="ppreview">
+          <canvas id="p-prev"></canvas>
+          <div id="p-scaleinfo" class="note"></div>
+        </div>
+      </div>
+      <div class="row right">
+        <button id="p-cancel">취소</button>
+        <span class="grow"></span>
+        <button id="p-pdf">PDF로 저장</button>
+        <button id="p-print" class="primary">🖨 인쇄…</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="vendor/earcut.min.js"></script>
+  <script src="dxf.js"></script>
+  <script src="scene.js"></script>
+  <script src="view.js"></script>
+  <script src="plot.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

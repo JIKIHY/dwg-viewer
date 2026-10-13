@@ -1,0 +1,18 @@
+{
+  "name": "dwg-viewer",
+  "productName": "DWG 뷰어",
+  "version": "1.0.1",
+  "description": "Mac용 DWG/DXF 뷰어 (LibreDWG 기반)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "./build-app.sh",
+    "dmg": "./make-dmg.sh"
+  },
+  "devDependencies": {
+    "electron": "^44.7.0"
+  },
+  "dependencies": {
+    "earcut": "^3.2.4"
+  }
+}

@@ -8,22 +8,23 @@
 </head>
 <body>
   <header id="toolbar">
-    <button id="btn-open" title="열기 (⌘O)">📂 열기</button>
+    <button id="btn-open">📂 열기</button>
     <span class="sep"></span>
-    <button data-tool="pan" class="tool active" title="이동 (Esc) — 드래그로 이동, 휠로 확대·축소">✋ 이동</button>
-    <button data-tool="zoomwin" class="tool" title="창 확대 (Z) — 드래그한 영역 확대">🔍 창 확대</button>
-    <button id="btn-extents" title="전체 보기 (F)">⤢ 전체</button>
+    <button data-tool="pan" class="tool active">✋ 이동</button>
+    <button data-tool="zoomwin" class="tool">🔍 창 확대</button>
+    <button id="btn-extents">⤢ 전체</button>
     <span class="sep"></span>
-    <button data-tool="dist" class="tool" title="거리 측정 (D)">📏 거리</button>
-    <button data-tool="area" class="tool" title="면적 측정 (A) — 클릭으로 점 추가, 더블클릭/Enter로 완료">⬠ 면적</button>
-    <button id="btn-clear" title="측정 지우기">🧹 측정 지우기</button>
+    <button data-tool="dist" class="tool">📏 거리</button>
+    <button data-tool="area" class="tool">⬠ 면적</button>
+    <button id="btn-clear">🧹 측정 지우기</button>
     <span class="sep"></span>
-    <button id="btn-xref" title="XREF 부착 (⌘⇧X)">📎 XREF 부착</button>
-    <button id="btn-bg" title="배경 전환 (⌘B)">◐ 배경</button>
-    <button id="btn-png" title="화면 저장 (⌘⇧S)">📷 PNG</button>
-    <button id="btn-print" title="인쇄 / PDF (⌘P)">🖨 인쇄</button>
+    <button id="btn-xref">📎 XREF 부착</button>
+    <button id="btn-bg">◐ 배경</button>
+    <button id="btn-png">📷 PNG</button>
+    <button id="btn-print">🖨 인쇄</button>
     <span class="sep"></span>
-    <button id="btn-panel" class="active" title="오른쪽 패널 숨기기/보이기 (⌘\)">▤ 패널</button>
+    <button id="btn-panel" class="active">▤ 패널</button>
+    <button id="btn-keys">⌨️ 단축키</button>
     <span id="docname"></span>
   </header>
 
@@ -83,7 +84,7 @@
     <label><input type="checkbox" id="snap-cen" checked /> 중심</label>
     <label><input type="checkbox" id="snap-near" checked /> 근처점</label>
     <span class="sep"></span>
-    <label title="트랙패드: 두 손가락 스크롤=이동, 핀치=확대·축소"><input type="checkbox" id="trackpad" /> 트랙패드 모드</label>
+    <label><input type="checkbox" id="trackpad" /> 트랙패드 모드</label>
     <span class="grow"></span>
     <span id="units"></span>
     <span id="info"></span>
@@ -165,6 +166,14 @@
         <button id="p-pdf">PDF로 저장</button>
         <button id="p-print" class="primary">🖨 인쇄…</button>
       </div>
+    </div>
+  </div>
+
+  <div id="tip" hidden></div>
+  <div id="keys-help" hidden>
+    <div class="box">
+      <h3>⌨️ 단축키 <span class="note">— 한글 입력 상태에서도 됩니다 · ? 또는 Esc로 닫기</span></h3>
+      <div id="keys-list"></div>
     </div>
   </div>
 

@@ -38,6 +38,22 @@ main { flex: 1; display: flex; min-height: 0; }
 #hint { position: absolute; left: 10px; bottom: 10px; background: rgba(0, 0, 0, 0.6); color: #fff; padding: 5px 10px; border-radius: 6px; pointer-events: none; display: none; }
 
 body.nopanel #panel { display: none; }
+
+/* 툴팁 · 단축키 */
+kbd { display: inline-block; min-width: 18px; padding: 1px 5px; border: 1px solid #5a6270; border-bottom-width: 2px; border-radius: 4px; background: #33373e; color: #fff; font: 600 11px -apple-system, sans-serif; text-align: center; line-height: 16px; }
+#tip { position: fixed; z-index: 50; max-width: 300px; padding: 7px 9px; background: #111317; border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45); pointer-events: none; font-size: 12px; line-height: 1.5; }
+#tip[hidden], #keys-help[hidden] { display: none; }
+#tip .t { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+#tip .t .grow { min-width: 10px; }
+#tip .d { color: var(--muted); margin-top: 3px; }
+#keys-help { position: fixed; inset: 0; z-index: 40; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; }
+#keys-help .box { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; max-height: 86vh; overflow: auto; width: min(760px, 94vw); }
+#keys-help h3 { margin: 0 0 10px; font-size: 15px; }
+#keys-list { columns: 2; column-gap: 24px; }
+#keys-list .g { break-inside: avoid; margin-bottom: 10px; }
+#keys-list .gh { color: var(--muted); font-size: 11px; margin-bottom: 3px; }
+#keys-list .r { display: flex; align-items: center; gap: 4px; padding: 2px 0; }
+#keys-list .r .n { flex: 1; }
 #panel { width: 300px; background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
 #tabs { display: flex; gap: 4px; padding: 8px; border-bottom: 1px solid var(--line); }
 #tabs button { flex: 1; padding: 5px 0; }

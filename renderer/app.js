@@ -966,12 +966,14 @@
   }, { passive: false });
 
   // ───────────────────────── 키보드 ─────────────────────────
+  let lastPanelKey = 0; // ⌘\ 를 메뉴와 화면이 둘 다 받아 두 번 토글되는 것 방지
   window.addEventListener('keydown', (ev) => {
     // 글자를 치는 입력칸에서만 단축키를 끈다 (체크박스·버튼 포커스는 해당 안 됨)
     const tg = ev.target;
     const typing = tg.isContentEditable || tg.tagName === 'TEXTAREA' || tg.tagName === 'SELECT' ||
       (tg.tagName === 'INPUT' && !['checkbox', 'radio', 'button', 'range', 'color'].includes(tg.type));
     if (ev.key === 'Escape') {
+      if (!$('#keys-help').hidden) { $('#keys-help').hidden = true; return; }
       if (!$('#modal').hidden) { $('#modal').hidden = true; return; }
       if (!$('#pmodal').hidden) { $('#pmodal').hidden = true; return; }
       if (S.tool === 'printwin') { S.pickCallback = null; setTool('pan'); if (printWin) openPrint(); return; }
@@ -979,16 +981,29 @@
       if (typing) ev.target.blur();
       return;
     }
-    if (typing || ev.metaKey || ev.ctrlKey || !$('#pmodal').hidden || !$('#modal').hidden) return;
+    if (ev.metaKey && ev.code === 'Backslash' && !typing) { lastPanelKey = performance.now(); setPanel(!panelShown()); ev.preventDefault(); return; }
+    if (!$('#keys-help').hidden && !typing) { if (ev.key === '?' || ev.code === 'Slash') toggleKeysHelp(); return; }
+    if (typing || ev.metaKey || ev.ctrlKey || ev.altKey || !$('#pmodal').hidden || !$('#modal').hidden) return;
     // 한글 입력 상태에서도 되도록 글자 대신 물리 키(KeyD 등)로 판단
     const k = /^Key[A-Z]$/.test(ev.code) ? ev.code.slice(3).toLowerCase() : ev.code === 'Space' ? ' ' : ev.key.toLowerCase();
     if (k === ' ') { spaceDown = true; ui.classList.add('pan'); ev.preventDefault(); if (tg.blur && tg !== document.body) tg.blur(); }
+    else if (ev.key === '?' || (ev.code === 'Slash' && ev.shiftKey)) toggleKeysHelp();
     else if (k === 'f') view.zoomExtents();
+    else if (k === 'p') setTool('pan');
     else if (k === 'd') setTool('dist');
     else if (k === 'a') setTool('area');
     else if (k === 'z') setTool('zoomwin');
+    else if (k === 'e') toggleCheck('#snap-end', '끝점 스냅');
+    else if (k === 'm') toggleCheck('#snap-mid', '중간점 스냅');
+    else if (k === 'c') toggleCheck('#snap-cen', '중심 스냅');
+    else if (k === 'n') toggleCheck('#snap-near', '근처점 스냅');
+    else if (k === 't') toggleCheck('#trackpad', '트랙패드 모드');
+    else if (['1', '2', '3', '4'].includes(ev.key) || /^Digit[1-4]$/.test(ev.code)) { setPanel(true); switchTab(['layers', 'xrefs', 'measure', 'search'][+ev.code.slice(-1) - 1]); }
     else if (k === 'enter' && S.tool === 'area') finishArea();
+    else if ((k === 'backspace' || k === 'delete') && ev.shiftKey) $('#btn-clear').click();
     else if ((k === 'backspace' || k === 'delete') && S.measures.length && !S.cur.length) { S.measures.pop(); renderMeasures(); drawUI(); }
+    else return;
+    if (k !== ' ') ev.preventDefault();
   });
   window.addEventListener('keyup', (ev) => {
     if (ev.code === 'Space' || ev.key === ' ') { spaceDown = false; ui.classList.toggle('pan', S.tool === 'pan'); }
@@ -1029,11 +1044,12 @@
     else if (c === 'zoom-out') zoomCenter(1 / 1.4);
     else if (c === 'toggle-bg') toggleBg();
     else if (c === 'search') { setPanel(true); switchTab('search'); }
-    else if (c === 'toggle-panel') setPanel(!panelShown());
+    else if (c === 'toggle-panel') { if (performance.now() - lastPanelKey > 300) setPanel(!panelShown()); }
     else if (c === 'attach-xref') startAttach();
     else if (c === 'save-png') savePng();
     else if (c === 'print') $('#btn-print').click();
     else if (c === 'reload' && S.mainPath) openPath(S.mainPath);
+    else if (c === 'keys-help') toggleKeysHelp();
   });
 
   // 끌어다 놓기
@@ -1054,6 +1070,91 @@
   renderLayers();
   renderMeasures();
   window.api.checkConverter().then((ok) => { $('#conv-warn').hidden = ok; });
+
+  // ───────────────────────── 단축키 표 · 툴팁 ─────────────────────────
+  // 버튼 툴팁과 단축키 목록(?)이 모두 이 표에서 나온다. 키 처리는 위 keydown과 메뉴(main.js)
+  const KEYS = [
+    ['파일', [
+      ['#btn-open', '열기', ['⌘O'], 'DWG/DXF 열기 — 새 탭으로 열립니다. 여러 개 선택 가능'],
+      [null, '새 탭 / 새 창', ['⌘T', '⌘N']],
+      [null, '탭 닫기', ['⌘W']],
+      [null, '다음 / 이전 탭', ['⌃Tab', '⌃⇧Tab']],
+      [null, '도면 다시 불러오기', ['⌘R']],
+      ['#btn-xref', 'XREF 부착', ['⌘⇧X'], '다른 도면을 겹쳐 붙입니다'],
+      ['#btn-png', 'PNG 저장', ['⌘⇧S'], '지금 화면을 이미지로 저장'],
+      ['#btn-print', '인쇄 / PDF', ['⌘P'], '측정 치수선도 함께 출력됩니다'],
+    ]],
+    ['보기', [
+      ['[data-tool=pan]', '이동', ['P', 'Esc'], '드래그로 이동, 휠로 확대·축소. Space를 누른 채 드래그해도 이동'],
+      ['[data-tool=zoomwin]', '창 확대', ['Z'], '드래그한 영역을 확대'],
+      ['#btn-extents', '전체 보기', ['F'], '휠 버튼 더블클릭도 같음'],
+      [null, '확대 / 축소', ['⌘=', '⌘-']],
+      ['#btn-bg', '배경 전환', ['⌘B'], '검정 ↔ 흰색 배경'],
+      ['#btn-panel', '패널 숨기기/보이기', ['⌘\\']],
+      ['[data-tab=layers]', '레이어 탭', ['1']],
+      ['[data-tab=xrefs]', 'XREF 탭', ['2']],
+      ['[data-tab=measure]', '측정 탭', ['3']],
+      ['[data-tab=search]', '문자 검색', ['4', '⌘F']],
+      ['#btn-keys', '단축키 목록', ['?']],
+    ]],
+    ['측정', [
+      ['[data-tool=dist]', '거리 (치수)', ['D'], '두 점 클릭. Shift: 수평/수직 고정. 그린 치수선은 끌어서 옮길 수 있음'],
+      ['[data-tool=area]', '면적', ['A'], '점을 차례로 클릭, 더블클릭·Enter·우클릭으로 완료'],
+      [null, '면적 완료', ['Enter']],
+      [null, '마지막 측정 지우기', ['⌫']],
+      ['#btn-clear', '측정 모두 지우기', ['⇧⌫']],
+      [null, '진행 중 측정 취소', ['Esc']],
+    ]],
+    ['스냅 · 입력', [
+      ['label:has(#snap-end)', '끝점 스냅 켜기/끄기', ['E']],
+      ['label:has(#snap-mid)', '중간점 스냅 켜기/끄기', ['M']],
+      ['label:has(#snap-cen)', '중심 스냅 켜기/끄기', ['C']],
+      ['label:has(#snap-near)', '근처점 스냅 켜기/끄기', ['N']],
+      ['label:has(#trackpad)', '트랙패드 모드', ['T'], '두 손가락 스크롤 = 이동, 핀치 = 확대·축소'],
+    ]],
+  ];
+  const kbds = (keys) => keys.map((k) => `<kbd>${k}</kbd>`).join(' ');
+  function toggleCheck(sel, name) {
+    const cb = $(sel);
+    cb.checked = !cb.checked;
+    cb.dispatchEvent(new Event('change'));
+    hint(`${name} ${cb.checked ? '켜짐' : '꺼짐'}`, 1500);
+  }
+  function toggleKeysHelp() {
+    const box = $('#keys-help');
+    if (box.hidden) {
+      $('#keys-list').innerHTML = KEYS.map(([g, rows]) => `<div class="g"><div class="gh">${g}</div>` +
+        rows.map(([, n, keys]) => `<div class="r"><span class="n">${n}</span>${kbds(keys)}</div>`).join('') + '</div>').join('');
+    }
+    box.hidden = !box.hidden;
+  }
+  $('#btn-keys').onclick = toggleKeysHelp;
+  $('#keys-help').onclick = (ev) => { if (ev.target.id === 'keys-help') toggleKeysHelp(); };
+  // 버튼에 마우스를 올리면 이름·단축키·설명 표시
+  const tip = $('#tip');
+  let tipTimer = null;
+  for (const [, rows] of KEYS) for (const [sel, n, keys, d] of rows) {
+    if (!sel) continue;
+    for (const el of $$(sel)) {
+      el.addEventListener('mouseenter', () => {
+        clearTimeout(tipTimer);
+        tipTimer = setTimeout(() => {
+          tip.innerHTML = `<div class="t"><span>${n}</span><span class="grow"></span>${kbds(keys)}</div>` + (d ? `<div class="d">${d}</div>` : '');
+          tip.hidden = false;
+          const r = el.getBoundingClientRect(), tw = tip.offsetWidth, th = tip.offsetHeight;
+          const below = r.bottom + 6 + th < window.innerHeight;
+          tip.style.left = Math.max(6, Math.min(window.innerWidth - tw - 6, r.left + r.width / 2 - tw / 2)) + 'px';
+          tip.style.top = (below ? r.bottom + 6 : r.top - th - 6) + 'px';
+        }, 250);
+      });
+      el.addEventListener('mouseleave', () => { clearTimeout(tipTimer); tip.hidden = true; });
+    }
+  }
+  // 버튼을 누른 뒤 포커스가 남아 Space/Enter가 버튼을 다시 누르지 않도록
+  document.addEventListener('mouseup', (ev) => {
+    const b = ev.target.closest && ev.target.closest('button, input[type=checkbox]');
+    if (b) setTimeout(() => b.blur(), 0);
+  });
 
   // 개발용 훅
   window.__dwg = { S, view, openPath };

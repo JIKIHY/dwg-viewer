@@ -219,13 +219,29 @@ function buildMenu() {
         { type: 'separator' },
         { label: '배경색 전환(검정/흰색)', accelerator: 'CmdOrCtrl+B', click: cmd('toggle-bg') },
         { label: '문자 검색', accelerator: 'CmdOrCtrl+F', click: cmd('search') },
-        { label: '오른쪽 패널 보기/숨기기', accelerator: 'CmdOrCtrl+\\', click: cmd('toggle-panel') },
+        // ⌘\ 는 한글 자판(₩)에서 메뉴가 못 잡는 경우가 있어 화면 쪽에서 물리 키로 처리
+        { label: '오른쪽 패널 보기/숨기기', accelerator: 'CmdOrCtrl+\\', registerAccelerator: false, click: cmd('toggle-panel') },
+        { label: '단축키 목록 (?)', click: cmd('keys-help') },
         { type: 'separator' },
         { role: 'togglefullscreen', label: '전체 화면' },
         { role: 'toggleDevTools', label: '개발자 도구' },
       ],
     },
-    { role: 'windowMenu', label: '윈도우' },
+    {
+      label: '윈도우',
+      role: 'window',
+      submenu: [
+        { role: 'minimize', label: '최소화' },
+        { role: 'zoom', label: '확대/축소' },
+        { type: 'separator' },
+        { role: 'selectNextTab', label: '다음 탭', accelerator: 'Ctrl+Tab' },
+        { role: 'selectPreviousTab', label: '이전 탭', accelerator: 'Ctrl+Shift+Tab' },
+        { role: 'mergeAllWindows', label: '모든 창을 탭으로 합치기' },
+        { role: 'moveTabToNewWindow', label: '탭을 새 창으로 분리' },
+        { type: 'separator' },
+        { role: 'front', label: '모두 앞으로 가져오기' },
+      ],
+    },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -376,6 +392,16 @@ app.whenReady().then(() => {
     const win = createWindow(process.env.DWGV_TEST_OPEN);
     win.webContents.on('console-message', (e) => console.log('[renderer]', e.message));
     setTimeout(async () => {
+      if (process.env.DWGV_TEST_MENU) {
+        // 개발용: 메뉴 항목을 단축키로 찾아 실행 (쉼표 구분, 예: CmdOrCtrl+B)
+        const find = (items, acc) => { for (const it of items) { if (it.accelerator === acc) return it; const r = it.submenu && find(it.submenu.items, acc); if (r) return r; } return null; };
+        for (const acc of process.env.DWGV_TEST_MENU.split(',')) {
+          const it = find(Menu.getApplicationMenu().items, acc);
+          console.log('[test-menu]', acc, it ? it.label : '없음');
+          if (it && it.click) it.click(it, win);
+          await new Promise((res) => setTimeout(res, 400));
+        }
+      }
       if (process.env.DWGV_TEST_JS) {
         const r = await win.webContents.executeJavaScript(process.env.DWGV_TEST_JS).catch((err) => 'JS 오류: ' + err.message);
         console.log('[test-js]', typeof r === 'string' ? r : JSON.stringify(r));

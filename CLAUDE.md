@@ -10,7 +10,7 @@ DWG/DXF 뷰어. DWG는 LibreDWG `dwg2dxf`로 DXF 변환 후 직접 해석·표�
 - `renderer/view.js` — WebGL 선/채움 + 2D 캔버스 문자
 - `renderer/plot.js` — CTB 해석 + 벡터 SVG 용지 생성 (인쇄)
 - `renderer/app.js` — UI: 레이어/XREF/측정/검색 패널, 스냅, 인쇄창, 패널 숨기기
-  - 단축키는 `ev.code`(KeyD 등)로 판단 — 한글 입력 상태에서도 동작해야 함
+  - 단축키는 `ev.code`(KeyD 등)로 판단 — 한글 입력 상태에서도 동작해야 함. 단축키를 추가·변경하면 `KEYS` 표(버튼 툴팁·`?` 목록)도 같이 고칠 것
   - 거리 측정 = 이동 가능한 치수(`off`), 인쇄 시 `Plot.dimPrims`로 함께 출력
 
 ## 빌드·배포
@@ -21,7 +21,7 @@ DWG/DXF 뷰어. DWG는 LibreDWG `dwg2dxf`로 DXF 변환 후 직접 해석·표�
 - 빌드 머신에 `brew install libredwg` 필요 (사용자 Mac에는 불필요)
 
 ## 자동 테스트 (숨은 창 캡처)
-환경변수 `DWGV_TEST_OPEN`(도면) `DWGV_TEST_SHOT`(png) `DWGV_TEST_JS`(실행할 JS) `DWGV_TEST_WAIT`(ms) `DWGV_TEST_PDF`(PDF 저장 대화상자 건너뛰기)로 `./node_modules/.bin/electron .` 실행. 렌더러 내부는 `window.__dwg = { S, view, openPath }`.
+환경변수 `DWGV_TEST_MENU`(쉼표로 구분한 메뉴 단축키, 예 `CmdOrCtrl+B`) `DWGV_TEST_OPEN`(도면) `DWGV_TEST_SHOT`(png) `DWGV_TEST_JS`(실행할 JS) `DWGV_TEST_WAIT`(ms) `DWGV_TEST_PDF`(PDF 저장 대화상자 건너뛰기)로 `./node_modules/.bin/electron .` 실행. 렌더러 내부는 `window.__dwg = { S, view, openPath }`.
 
 ## 미지원 / 다음 후보
 배치(레이아웃) 탭·뷰포트, MLINE·MULTILEADER, 이미지/OLE, 인텔 Mac 빌드, 실제 설계사 CTB(Ga3*.ctb)로 출력 검증

@@ -45,6 +45,7 @@ cat > "$BIN/LibreDWG-LICENSE.txt" <<'TXT'
 dwg2dxf, libredwg.0.dylib: GNU LibreDWG 0.14 (GPLv3)
 소스코드: https://www.gnu.org/software/libredwg/  ·  https://github.com/LibreDWG/libredwg
 라이선스 전문: https://www.gnu.org/licenses/gpl-3.0.html
+DWG 뷰어 전체 소스(GPLv3): https://github.com/JIKIHY/dwg-viewer
 TXT
 codesign --force --sign - "$BIN/libredwg.0.dylib"
 codesign --force --sign - "$BIN/dwg2dxf"

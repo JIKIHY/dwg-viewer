@@ -2,13 +2,7 @@ DWG 뷰어 설치 방법
 ========================
 
 1) 'DWG 뷰어' 아이콘을 옆의 'Applications' 폴더로 끌어다 놓습니다.
-
-2) 처음 실행할 때 "확인되지 않은 개발자" 경고가 뜨면:
-   - 응용 프로그램 폴더에서 'DWG 뷰어'를 우클릭 → [열기] → [열기]
-   - 또는 시스템 설정 → 개인정보 보호 및 보안 → 맨 아래 [그래도 열기]
-
-3) "손상되었기 때문에 열 수 없습니다"라고 나오면 터미널에서 한 번만 실행:
-   xattr -dr com.apple.quarantine "/Applications/DWG 뷰어.app"
+2) 응용 프로그램 폴더에서 'DWG 뷰어'를 엽니다. (Apple 공증을 받은 앱이라 경고 없이 열립니다)
 
 요구 사항
 - Apple Silicon(M1 이상) Mac, macOS 12 이상
@@ -17,3 +11,4 @@ DWG 뷰어 설치 방법
 참고
 - CTB 플롯 스타일은 Mac마다 따로 보관됩니다. 새 Mac에서는 인쇄창의 [파일 선택…]으로 한 번 불러오세요.
 - 포함된 LibreDWG는 GPLv3 소프트웨어입니다 (앱 내부 Resources/bin/LibreDWG-LICENSE.txt 참고).
+- 소스 코드: https://github.com/JIKIHY/dwg-viewer

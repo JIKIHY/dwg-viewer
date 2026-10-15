@@ -8,7 +8,7 @@ Mac에서 AutoCAD DWG/DXF 도면을 보는 무료 뷰어입니다. 도면은 이
 
 ## 설치
 [Releases](../../releases)에서 `DWG뷰어-<버전>.dmg`를 받아 'DWG 뷰어'를 Applications 폴더로 끌어다 놓습니다.
-Apple Silicon(M1 이상) Mac, macOS 12 이상.
+Apple Silicon(M1 이상) Mac, macOS 12 이상. Apple 공증을 받아 경고 없이 열립니다.
 
 ## 직접 빌드
 ```bash
@@ -16,7 +16,8 @@ brew install libredwg   # 빌드하는 Mac에만 필요 (앱 안에 포함됨)
 npm install
 npm start               # 개발 실행
 ./build-app.sh          # dist/DWG 뷰어.app
-./make-dmg.sh           # DMG 만들기
+./make-dmg.sh           # DMG 만들기 (ad-hoc 서명)
+./sign-notarize.sh      # 배포용: Developer ID 서명 + Apple 공증 DMG
 ```
 
 ## 라이선스

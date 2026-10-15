@@ -17,7 +17,8 @@ DWG/DXF 뷰어. DWG는 LibreDWG `dwg2dxf`로 DXF 변환 후 직접 해석·표�
 - 개발 실행: `npm start`
 - 앱 빌드: `./build-app.sh` → `dist/DWG 뷰어.app` (LibreDWG를 Resources/bin에 내장, ad-hoc 서명). electron-builder는 Electron 44에서 시작 즉시 크래시하므로 쓰지 않는다
 - 설치: `ditto "dist/DWG 뷰어.app" "/Applications/DWG 뷰어.app"`
-- DMG: `./make-dmg.sh` → `~/Downloads/클로드코드/DWG뷰어-설치파일/DWG뷰어-<버전>.dmg` (버전은 package.json)
+- 배포용 DMG: `./sign-notarize.sh` — Developer ID 서명(하드닝 런타임, `entitlements.mac.plist`) → DMG → `notarytool`(키체인 프로필 `dwg-notary`) → 스테이플. Homebrew rsync 충돌은 없음(xcodebuild 미사용)
+- 시험용 DMG: `./make-dmg.sh` → `~/Downloads/클로드코드/DWG뷰어-설치파일/DWG뷰어-<버전>.dmg` (버전은 package.json)
 - 빌드 머신에 `brew install libredwg` 필요 (사용자 Mac에는 불필요)
 
 ## 자동 테스트 (숨은 창 캡처)

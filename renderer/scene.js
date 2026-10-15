@@ -51,6 +51,16 @@
       this.a[this.n++] = x; this.a[this.n++] = y;
     }
   }
+  // 화면용 선 좌표: 첫 점을 기준으로 한 Float32 차이값으로 쌓는다 (Float64의 절반 메모리).
+  // 최종 linePos도 Float32라 표시 정밀도는 같다
+  class F32B {
+    constructor(n) { this.a = new Float32Array(n || 1024); this.n = 0; this.bx = 0; this.by = 0; }
+    push2(x, y) {
+      if (this.n === 0) { this.bx = x; this.by = y; }
+      if (this.n + 2 > this.a.length) { const b = new Float32Array(this.a.length * 2); b.set(this.a); this.a = b; }
+      this.a[this.n++] = x - this.bx; this.a[this.n++] = y - this.by;
+    }
+  }
   class U32 {
     constructor(n) { this.a = new Uint32Array(n || 512); this.n = 0; }
     push(v) {
@@ -465,6 +475,8 @@
   // ───────── 장면 빌더 ─────────
   function build(opts) {
     const { mainDoc, docs, attached } = opts;
+    // lite(휴대폰): 스냅 점은 Float32(기준점 차이)로, 스냅용 선분(segs)은 따로 모으지 않는다 — 화면용 linePos를 대신 쓴다
+    const LITE = !!opts.lite;
     const H = mainDoc;
     let diag = Math.hypot(H.extmax[0] - H.extmin[0], H.extmax[1] - H.extmin[1]);
     if (!(diag > 0 && diag < 1e9)) diag = 100000;
@@ -476,8 +488,9 @@
     const groupIndex = new Map([['', 0]]);
     const buckets = new Map(); // "layerId:groupId" → {lines:F64, lcol:U32, tris:F64, tcol:U32}
     const texts = [];
-    const snapPts = new F64(4096), snapKind = [], snapLayer = [];
-    const segs = new F64(8192), segLayer = [];
+    // 스냅용 점·선분. 큰 XREF 묶음은 수백만 개라 일반 배열 대신 타입 배열로 쌓는다 (휴대폰 메모리)
+    const snapPts = LITE ? new F32B(4096) : new F64(4096), snapKind = new U8(2048), snapLayer = new U32(2048);
+    const segs = LITE ? null : new F64(8192), segLayer = LITE ? null : new U32(2048);
     const stats = { entities: 0, skippedHatch: 0 };
 
     function layerInfo(ctx, rawName) {
@@ -508,7 +521,7 @@
     function bucket(L, ctx) {
       const k = L.id * 65536 + ctx.group;
       let b = buckets.get(k);
-      if (!b) { b = { layer: L.id, group: ctx.group, lines: new F64(256), lcol: new U32(128), llw: new U8(64), tris: new F64(64), tcol: new U32(32) }; buckets.set(k, b); }
+      if (!b) { b = { layer: L.id, group: ctx.group, lines: new F32B(256), lcol: new U32(128), llw: new U8(64), tris: new F64(64), tcol: new U32(32) }; buckets.set(k, b); }
       return b;
     }
     // 색상은 (ACI << 24 | RGB) 로 묶어 다닌다. ACI는 CTB 인쇄에 쓰인다.
@@ -558,11 +571,12 @@
         const bx = m[0] * x2 + m[2] * y2 + m[4], by = m[1] * x2 + m[3] * y2 + m[5];
         if (clips) clipSeg(clips, ax, ay, bx, by, put); else put(ax, ay, bx, by);
       };
-      const putSnap = (ax, ay, bx, by) => { segs.push2(ax, ay); segs.push2(bx, by); segLayer.push(L.id); };
+      const putSnap = LITE ? () => {} : (ax, ay, bx, by) => { segs.push2(ax, ay); segs.push2(bx, by); segLayer.push(L.id); };
       let dashed = false;
       if (pat) dashed = dashPolyline(pts, pat, ltsc, seg);
       for (let i = 2; i < pts.length; i += 2) {
         if (!dashed) seg(pts[i - 2], pts[i - 1], pts[i], pts[i + 1]);
+        if (LITE) continue;
         const a = xf(m, pts[i - 2], pts[i - 1]), c = xf(m, pts[i], pts[i + 1]);
         if (clips) clipSeg(clips, a[0], a[1], c[0], c[1], putSnap); else putSnap(a[0], a[1], c[0], c[1]);
       }
@@ -834,9 +848,9 @@
     let totalL = 0, totalT = 0;
     for (const b of buckets.values()) {
       totalL += b.lines.n / 2; totalT += b.tris.n / 2;
-      const a = b.lines.a;
+      const a = b.lines.a, bx = b.lines.bx, by = b.lines.by;
       for (let i = 0; i < b.lines.n; i += 2) {
-        const x = a[i], y = a[i + 1];
+        const x = a[i] + bx, y = a[i + 1] + by;
         if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
         if ((i & 63) === 0) { sx.push(x); sy.push(y); }
       }
@@ -879,10 +893,12 @@
     const ranges = [];
     let li = 0, ti = 0;
     const sorted = [...buckets.values()].sort((a, b) => a.layer - b.layer || a.group - b.group);
+    buckets.clear();
     for (const b of sorted) {
       const r = { layer: b.layer, group: b.group, ls: li, lc: b.lines.n / 2, ts: ti, tc: b.tris.n / 2 };
+      const lbx = b.lines.bx - ox, lby = b.lines.by - oy;
       for (let i = 0; i < b.lines.n; i += 2) {
-        linePos[li * 2] = b.lines.a[i] - ox; linePos[li * 2 + 1] = b.lines.a[i + 1] - oy;
+        linePos[li * 2] = b.lines.a[i] + lbx; linePos[li * 2 + 1] = b.lines.a[i + 1] + lby;
         const c = b.lcol.a[i >> 1];
         lineCol[li * 4] = (c >> 16) & 255; lineCol[li * 4 + 1] = (c >> 8) & 255; lineCol[li * 4 + 2] = c & 255; lineCol[li * 4 + 3] = Math.floor(c / 16777216);
         if (!(li & 1)) lineLw[li >> 1] = b.llw.a[i >> 2];
@@ -895,7 +911,11 @@
         ti++;
       }
       ranges.push(r);
+      b.lines = b.lcol = b.llw = b.tris = b.tcol = null; // 옮긴 버킷은 바로 놓아 최대 메모리를 낮춘다
     }
+    sorted.length = 0;
+    // 다 쓴 가변 배열의 남는 칸 정리: 많이 남으면 잘라 복사, 거의 찼으면 복사 없이 앞부분만 본다
+    const trim = (v) => (v.n === v.a.length ? v.a : v.n < v.a.length * 0.75 ? v.a.slice(0, v.n) : v.a.subarray(0, v.n));
 
     return {
       layers: layerList,
@@ -907,8 +927,9 @@
       extents: ext,
       fullExtents: full,
       texts,
-      snap: { pts: snapPts.a.slice(0, snapPts.n), kind: Uint8Array.from(snapKind), layer: Uint32Array.from(snapLayer) },
-      segs: { a: segs.a.slice(0, segs.n), layer: Uint32Array.from(segLayer) },
+      // base: 스냅 점 좌표에 더할 기준점 (lite에서만 0이 아님)
+      snap: { pts: trim(snapPts), base: LITE ? [snapPts.bx, snapPts.by] : [0, 0], kind: trim(snapKind), layer: trim(snapLayer) },
+      segs: LITE ? null : { a: trim(segs), layer: trim(segLayer) },
       space,
       units: mainDoc.insunits,
       stats: { ...stats, segments: totalL / 2, triangles: totalT / 3, texts: texts.length },

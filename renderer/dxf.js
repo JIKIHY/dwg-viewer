@@ -38,10 +38,12 @@
     return fallback;
   }
 
-  // split()으로 잘린 긴 문자열은 원본 파일 전체를 메모리에 붙잡아 두므로 복사본으로 바꾼다.
+  // split()으로 잘린 문자열은 원본 파일 전체를 메모리에 붙잡아 두므로 복사본으로 바꾼다.
+  // 사파리·iOS(JSC)는 짧은 조각도 원본을 붙잡는다(도면 하나에 원문 수십 MB) → 길이와 상관없이 복사.
+  // 같은 글자(레이어 이름 등)는 한 벌만 두어 메모리도 아낀다
   const INTERN = new Map();
   function own(s) {
-    if (s.length < 13) return s;
+    if (s.length === 0) return '';
     let v = INTERN.get(s);
     if (v === undefined) {
       v = JSON.parse(JSON.stringify(s));
@@ -369,8 +371,8 @@
     function parseHeader(a, b) {
       let cur = null;
       for (let i = a; i < b; i++) {
-        if (codes[i] === 9) { cur = vals[i].trim(); doc.header[cur] = {}; }
-        else if (cur) doc.header[cur][codes[i]] = vals[i];
+        if (codes[i] === 9) { cur = own(vals[i].trim()); doc.header[cur] = {}; }
+        else if (cur) doc.header[cur][codes[i]] = own(vals[i]);
       }
     }
     function parseTables(a, b) {

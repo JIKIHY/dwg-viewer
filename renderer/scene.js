@@ -69,6 +69,24 @@
     }
   }
 
+  // lite(휴대폰)용 가변 배열: 두 배로 새로 만들고 옛 배열을 버리는 대신 조각을 이어 붙인다.
+  // 옛 배열 쓰레기(최종 크기만큼)가 생기지 않아 화면 구성 중 순간 메모리가 크게 준다
+  class Chunks {
+    constructor(T, first) { this.T = T; this.cur = new T(first); this.chunks = [this.cur]; this.ci = 0; this.n = 0; this.bx = 0; this.by = 0; }
+    _grow() { this.cur = new this.T(Math.min(this.cur.length * 2, 1 << 20)); this.chunks.push(this.cur); this.ci = 0; }
+    push(v) { if (this.ci === this.cur.length) this._grow(); this.cur[this.ci++] = v; this.n++; }
+    push2(x, y) { // 좌표: 첫 점 기준 차이값 (F32B와 같음)
+      if (this.n === 0) { this.bx = x; this.by = y; }
+      if (this.ci + 2 > this.cur.length) this._grow();
+      this.cur[this.ci++] = x - this.bx; this.cur[this.ci++] = y - this.by; this.n += 2;
+    }
+    flat() {
+      const out = new this.T(this.n);
+      let o = 0;
+      for (const c of this.chunks) { const k = Math.min(c.length, this.n - o); if (k <= 0) break; out.set(k === c.length ? c : c.subarray(0, k), o); o += k; }
+      return out;
+    }
+  }
   class U8 {
     constructor(n) { this.a = new Uint8Array(n || 256); this.n = 0; }
     push(v) {
@@ -489,7 +507,7 @@
     const buckets = new Map(); // "layerId:groupId" → {lines:F64, lcol:U32, tris:F64, tcol:U32}
     const texts = [];
     // 스냅용 점·선분. 큰 XREF 묶음은 수백만 개라 일반 배열 대신 타입 배열로 쌓는다 (휴대폰 메모리)
-    const snapPts = LITE ? new F32B(4096) : new F64(4096), snapKind = new U8(2048), snapLayer = new U32(2048);
+    const snapPts = LITE ? new Chunks(Float32Array, 4096) : new F64(4096), snapKind = LITE ? new Chunks(Uint8Array, 2048) : new U8(2048), snapLayer = LITE ? new Chunks(Uint16Array, 2048) : new U32(2048);
     const segs = LITE ? null : new F64(8192), segLayer = LITE ? null : new U32(2048);
     const stats = { entities: 0, skippedHatch: 0 };
 
@@ -518,12 +536,24 @@
       layerList.push(info);
       return info;
     }
-    function bucket(L, ctx) {
-      const k = L.id * 65536 + ctx.group;
+    // lite: 도면을 TS 크기 구역(타일)으로 나눠 버킷을 따로 둔다 → 휴대폰은 구역별로 GPU에 올리고 보이는 구역만 그린다
+    const TS = diag / 6;
+    const tileIds = new Map();
+    function tileAt(x, y) {
+      if (!LITE || !isFinite(x) || !isFinite(y)) return 0;
+      const key = Math.floor(x / TS) + ',' + Math.floor(y / TS);
+      let id = tileIds.get(key);
+      if (id === undefined) { id = tileIds.size; tileIds.set(key, id); }
+      return id;
+    }
+    function bucket(L, ctx, tile) {
+      const t = tile || 0;
+      const k = (t * 65536 + L.id) * 65536 + ctx.group;
       let b = buckets.get(k);
-      if (!b) { b = { layer: L.id, group: ctx.group, lines: new F32B(256), lcol: new U32(128), llw: new U8(64), tris: new F64(64), tcol: new U32(32) }; buckets.set(k, b); }
+      if (!b) { b = { tile: t, layer: L.id, group: ctx.group, lines: LITE ? new Chunks(Float32Array, 256) : new F32B(256), lcol: LITE ? new Chunks(Uint32Array, 128) : new U32(128), llw: LITE ? null : new U8(64), tris: new F64(64), tcol: new U32(32) }; buckets.set(k, b); }
       return b;
     }
+    const tileOfLocal = (m, x, y) => (LITE ? tileAt(m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]) : 0);
     // 색상은 (ACI << 24 | RGB) 로 묶어 다닌다. ACI는 CTB 인쇄에 쓰인다.
     function colorOf(e, ctx, L) {
       if (e.tc !== null && e.tc !== undefined) return pack(nearestAci(e.tc & 0xffffff), e.tc);
@@ -562,10 +592,11 @@
     function emitPoly(ctx, pts, closed, col, L, pat, ltsc) {
       if (pts.length < 4) return;
       if (closed) pts = pts.concat([pts[0], pts[1]]);
-      const b = bucket(L, ctx);
       const m = ctx.m;
+      const b = bucket(L, ctx, tileOfLocal(m, pts[0], pts[1]));
       const clips = ctx.clips;
-      const put = (ax, ay, bx, by) => { b.lines.push2(ax, ay); b.lines.push2(bx, by); b.lcol.push(col); b.lcol.push(col); b.llw.push(curLw); };
+      const put = LITE ? (ax, ay, bx, by) => { b.lines.push2(ax, ay); b.lines.push2(bx, by); b.lcol.push(col); }
+        : (ax, ay, bx, by) => { b.lines.push2(ax, ay); b.lines.push2(bx, by); b.lcol.push(col); b.lcol.push(col); b.llw.push(curLw); };
       const seg = (x1, y1, x2, y2) => {
         const ax = m[0] * x1 + m[2] * y1 + m[4], ay = m[1] * x1 + m[3] * y1 + m[5];
         const bx = m[0] * x2 + m[2] * y2 + m[4], by = m[1] * x2 + m[3] * y2 + m[5];
@@ -583,7 +614,8 @@
       L.count++;
     }
     function emitTris(ctx, tri, col, L) {
-      const b = bucket(L, ctx), m = ctx.m;
+      const m = ctx.m;
+      const b = bucket(L, ctx, tri.length >= 2 ? tileOfLocal(m, tri[0], tri[1]) : 0);
       for (let i = 0; i + 5 < tri.length; i += 6) {
         const w = [];
         for (let k = 0; k < 6; k += 2) w.push(m[0] * tri[i + k] + m[2] * tri[i + k + 1] + m[4], m[1] * tri[i + k] + m[3] * tri[i + k + 1] + m[5]);
@@ -809,8 +841,10 @@
           if (!loops.length) break;
           if (e.solid) emitTris(ocs, triangulate(loops), col, L);
           else if (e.plines.length) {
-            const b = bucket(L, ocs), m = ocs.m;
-            const put = (ax, ay, bx, by) => { b.lines.push2(ax, ay); b.lines.push2(bx, by); b.lcol.push(col); b.lcol.push(col); b.llw.push(curLw); };
+            const m = ocs.m, l0 = loops[0];
+            const b = bucket(L, ocs, l0 && l0.length >= 2 ? tileOfLocal(m, l0[0], l0[1]) : 0);
+            const put = LITE ? (ax, ay, bx, by) => { b.lines.push2(ax, ay); b.lines.push2(bx, by); b.lcol.push(col); }
+              : (ax, ay, bx, by) => { b.lines.push2(ax, ay); b.lines.push2(bx, by); b.lcol.push(col); b.lcol.push(col); b.llw.push(curLw); };
             const n = hatchPattern(loops, e.plines, (x1, y1, x2, y2) => {
               const ax = m[0] * x1 + m[2] * y1 + m[4], ay = m[1] * x1 + m[3] * y1 + m[5];
               const bx = m[0] * x2 + m[2] * y2 + m[4], by = m[1] * x2 + m[3] * y2 + m[5];
@@ -844,15 +878,22 @@
 
     // ── 범위 계산 ──
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    if (opts.freeDocs && docs && docs.clear) docs.clear(); // 전개 끝: 호출한 쪽이 허락하면 XREF 해석본을 놓는다
     const sx = [], sy = [];
     let totalL = 0, totalT = 0;
     for (const b of buckets.values()) {
       totalL += b.lines.n / 2; totalT += b.tris.n / 2;
-      const a = b.lines.a, bx = b.lines.bx, by = b.lines.by;
-      for (let i = 0; i < b.lines.n; i += 2) {
-        const x = a[i] + bx, y = a[i + 1] + by;
-        if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
-        if ((i & 63) === 0) { sx.push(x); sy.push(y); }
+      const bx = b.lines.bx, by = b.lines.by;
+      let rem = b.lines.n, g = 0;
+      for (const a of b.lines.chunks || [b.lines.a]) {
+        const m = Math.min(a.length, rem);
+        for (let i = 0; i < m; i += 2, g += 2) {
+          const x = a[i] + bx, y = a[i + 1] + by;
+          if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+          if ((g & 63) === 0) { sx.push(x); sy.push(y); }
+        }
+        rem -= m;
+        if (rem <= 0) break;
       }
       for (let i = 0; i < b.tris.n; i += 2) {
         const x = b.tris.a[i], y = b.tris.a[i + 1];
@@ -888,30 +929,88 @@
     const ox = (ext[0] + ext[2]) / 2, oy = (ext[1] + ext[3]) / 2;
 
     // ── GPU 버퍼로 합치기 (레이어·그룹별 연속 구간) ──
-    const linePos = new Float32Array(totalL * 2), lineCol = new Uint8Array(totalL * 4), lineLw = new Uint8Array(totalL / 2);
     const triPos = new Float32Array(totalT * 2), triCol = new Uint8Array(totalT * 4);
     const ranges = [];
     let li = 0, ti = 0;
-    const sorted = [...buckets.values()].sort((a, b) => a.layer - b.layer || a.group - b.group);
+    const sorted = [...buckets.values()].sort((a, b) => a.tile - b.tile || a.layer - b.layer || a.group - b.group);
     buckets.clear();
-    for (const b of sorted) {
-      const r = { layer: b.layer, group: b.group, ls: li, lc: b.lines.n / 2, ts: ti, tc: b.tris.n / 2 };
-      const lbx = b.lines.bx - ox, lby = b.lines.by - oy;
-      for (let i = 0; i < b.lines.n; i += 2) {
-        linePos[li * 2] = b.lines.a[i] + lbx; linePos[li * 2 + 1] = b.lines.a[i + 1] + lby;
-        const c = b.lcol.a[i >> 1];
-        lineCol[li * 4] = (c >> 16) & 255; lineCol[li * 4 + 1] = (c >> 8) & 255; lineCol[li * 4 + 2] = c & 255; lineCol[li * 4 + 3] = Math.floor(c / 16777216);
-        if (!(li & 1)) lineLw[li >> 1] = b.llw.a[i >> 2];
-        li++;
-      }
+    const putTris = (b) => {
       for (let i = 0; i < b.tris.n; i += 2) {
         triPos[ti * 2] = b.tris.a[i] - ox; triPos[ti * 2 + 1] = b.tris.a[i + 1] - oy;
         const c = b.tcol.a[i >> 1];
         triCol[ti * 4] = (c >> 16) & 255; triCol[ti * 4 + 1] = (c >> 8) & 255; triCol[ti * 4 + 2] = c & 255; triCol[ti * 4 + 3] = Math.floor(c / 16777216);
         ti++;
       }
-      ranges.push(r);
-      b.lines = b.lcol = b.llw = b.tris = b.tcol = null; // 옮긴 버킷은 바로 놓아 최대 메모리를 낮춘다
+    };
+    let linePos = null, lineCol = null, lineLw = null;
+    const tiles = [];
+    if (LITE) {
+      // lite(휴대폰): 화면 전체 선 배열을 만들지 않고 구역마다 만들어 opts.onTile로 넘긴 뒤(GPU로 올림) 버킷을 바로 놓는다.
+      // 구역 좌표(pos)는 스냅용으로 남기고, 색(col)은 넘긴 뒤 버린다 → 최대 메모리가 선 데이터 한 벌 남짓
+      for (const b of sorted) {
+        const r = { layer: b.layer, group: b.group, ls: 0, lc: 0, ts: ti, tc: b.tris.n / 2, tile: b.tile };
+        putTris(b);
+        if (r.tc) ranges.push(r);
+        b.tris = b.tcol = null;
+      }
+      let i0 = 0;
+      while (i0 < sorted.length) {
+        const tile = sorted[i0].tile;
+        let i1 = i0, nv = 0;
+        while (i1 < sorted.length && sorted[i1].tile === tile) { nv += sorted[i1].lines.n / 2; i1++; }
+        if (nv) {
+          const pos = new Float32Array(nv * 2), col = new Uint8Array(nv * 4), pieces = [], bb = [Infinity, Infinity, -Infinity, -Infinity];
+          let v = 0;
+          for (let j = i0; j < i1; j++) {
+            const b = sorted[j], n = b.lines.n / 2;
+            if (n) {
+              pieces.push({ layer: b.layer, group: b.group, s: v, n });
+              const lbx = b.lines.bx - ox, lby = b.lines.by - oy;
+              const lch = b.lcol.chunks;
+              let lcI = 0, lcP = 0, c = 0, rem = b.lines.n, k = 0;
+              for (const a of b.lines.chunks) {
+                const m = Math.min(a.length, rem);
+                for (let i = 0; i < m; i += 2, k++) {
+                  const px = a[i] + lbx, py = a[i + 1] + lby;
+                  pos[v * 2] = px; pos[v * 2 + 1] = py;
+                  if (px < bb[0]) bb[0] = px; if (px > bb[2]) bb[2] = px; if (py < bb[1]) bb[1] = py; if (py > bb[3]) bb[3] = py;
+                  if (!(k & 1)) { // lite는 색을 선분당 한 번 저장 → 선분 시작점에서 다음 색을 꺼낸다
+                    c = lch[lcI][lcP++];
+                    if (lcP === lch[lcI].length) { lcI++; lcP = 0; }
+                  }
+                  col[v * 4] = (c >> 16) & 255; col[v * 4 + 1] = (c >> 8) & 255; col[v * 4 + 2] = c & 255; col[v * 4 + 3] = Math.floor(c / 16777216);
+                  v++;
+                }
+                rem -= m;
+                if (rem <= 0) break;
+              }
+            }
+            b.lines = b.lcol = null;
+            sorted[j] = null;
+          }
+          const t = { pieces, bb, n: nv / 2, pos };
+          if (opts.onTile) opts.onTile(t, col); else t.col = col;
+          tiles.push(t);
+        }
+        i0 = i1;
+      }
+      li = totalL;
+    } else {
+      linePos = new Float32Array(totalL * 2); lineCol = new Uint8Array(totalL * 4); lineLw = new Uint8Array(totalL / 2);
+      for (const b of sorted) {
+        const r = { layer: b.layer, group: b.group, ls: li, lc: b.lines.n / 2, ts: ti, tc: b.tris.n / 2 };
+        const lbx = b.lines.bx - ox, lby = b.lines.by - oy;
+        for (let i = 0; i < b.lines.n; i += 2) {
+          linePos[li * 2] = b.lines.a[i] + lbx; linePos[li * 2 + 1] = b.lines.a[i + 1] + lby;
+          const c = b.lcol.a[i >> 1];
+          lineCol[li * 4] = (c >> 16) & 255; lineCol[li * 4 + 1] = (c >> 8) & 255; lineCol[li * 4 + 2] = c & 255; lineCol[li * 4 + 3] = Math.floor(c / 16777216);
+          if (!(li & 1)) lineLw[li >> 1] = b.llw.a[i >> 2];
+          li++;
+        }
+        putTris(b);
+        ranges.push(r);
+        b.lines = b.lcol = b.llw = b.tris = b.tcol = null; // 옮긴 버킷은 바로 놓아 최대 메모리를 낮춘다
+      }
     }
     sorted.length = 0;
     // 다 쓴 가변 배열의 남는 칸 정리: 많이 남으면 잘라 복사, 거의 찼으면 복사 없이 앞부분만 본다
@@ -928,8 +1027,10 @@
       fullExtents: full,
       texts,
       // base: 스냅 점 좌표에 더할 기준점 (lite에서만 0이 아님)
-      snap: { pts: trim(snapPts), base: LITE ? [snapPts.bx, snapPts.by] : [0, 0], kind: trim(snapKind), layer: trim(snapLayer) },
+      snap: LITE ? { pts: snapPts.flat(), base: [snapPts.bx, snapPts.by], kind: snapKind.flat(), layer: snapLayer.flat() }
+        : { pts: trim(snapPts), base: [0, 0], kind: trim(snapKind), layer: trim(snapLayer) },
       segs: LITE ? null : { a: trim(segs), layer: trim(segLayer) },
+      tiles: LITE ? tiles : null, // lite: 구역별 {pieces, bb, n, pos} (색은 onTile로 넘김). 이때 linePos·lineCol은 null
       space,
       units: mainDoc.insunits,
       stats: { ...stats, segments: totalL / 2, triangles: totalT / 3, texts: texts.length },

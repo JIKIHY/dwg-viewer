@@ -132,7 +132,8 @@
       document.title = r.name; // macOS 탭 이름
       $('#empty').hidden = true;
       const miss = S.xrefs.filter((x) => x.status !== 'ok').length;
-      if (miss) hint(`XREF ${miss}개를 찾지 못했습니다. 오른쪽 XREF 탭에서 파일을 지정할 수 있습니다.`, 6000);
+      if (r.warning) hint(r.warning, 10000);
+      else if (miss) hint(`XREF ${miss}개를 찾지 못했습니다. 오른쪽 XREF 탭에서 파일을 지정할 수 있습니다.`, 6000);
     } catch (err) {
       setLoading(false);
       hint('열기 실패: ' + err.message, 8000);

@@ -38,16 +38,23 @@ SRC=$(readlink -f /opt/homebrew/bin/dwg2dxf)
 LIB=$(otool -L "$SRC" | awk 'NR>1 && /libredwg/{print $1}')
 cp "$SRC" "$BIN/dwg2dxf"
 cp "$LIB" "$BIN/libredwg.0.dylib"
-chmod u+w "$BIN/dwg2dxf" "$BIN/libredwg.0.dylib"
+# 프록시 엔티티에서 dwg2dxf가 죽는 문제를 피하는 변환기 (앱은 이것을 먼저 쓴다)
+/usr/bin/clang -O2 -I/opt/homebrew/include -L/opt/homebrew/lib -lredwg -o native/dwg2dxf-safe native/dwg2dxf-safe.c
+cp native/dwg2dxf-safe "$BIN/dwg2dxf-safe"
+SAFE_LIB=$(otool -L "$BIN/dwg2dxf-safe" | awk 'NR>1 && /libredwg/{print $1}')
+chmod u+w "$BIN/dwg2dxf" "$BIN/dwg2dxf-safe" "$BIN/libredwg.0.dylib"
 install_name_tool -id @loader_path/libredwg.0.dylib "$BIN/libredwg.0.dylib"
 install_name_tool -change "$LIB" @loader_path/libredwg.0.dylib "$BIN/dwg2dxf"
+install_name_tool -change "$SAFE_LIB" @loader_path/libredwg.0.dylib "$BIN/dwg2dxf-safe"
 cat > "$BIN/LibreDWG-LICENSE.txt" <<'TXT'
 dwg2dxf, libredwg.0.dylib: GNU LibreDWG 0.14 (GPLv3)
+dwg2dxf-safe: DWG 뷰어 소스의 native/dwg2dxf-safe.c (GPLv3, LibreDWG 사용)
 소스코드: https://www.gnu.org/software/libredwg/  ·  https://github.com/LibreDWG/libredwg
 라이선스 전문: https://www.gnu.org/licenses/gpl-3.0.html
 DWG 뷰어 전체 소스(GPLv3): https://github.com/JIKIHY/dwg-viewer
 TXT
 codesign --force --sign - "$BIN/libredwg.0.dylib"
 codesign --force --sign - "$BIN/dwg2dxf"
+codesign --force --sign - "$BIN/dwg2dxf-safe"
 codesign --force --deep --sign - "$OUT"
 echo "built: $OUT"

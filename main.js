@@ -17,37 +17,65 @@ let pendingOpen = [];
 if (process.env.DWGV_TEST_OPEN) app.commandLine.appendSwitch('js-flags', '--expose-gc'); // 앱 준비 전에 Finder에서 넘어온 파일
 
 // ───────────────────────── dwg2dxf ─────────────────────────
-function findDwg2dxf() {
-  const candidates = [
-    path.join(process.resourcesPath || '', 'bin', 'dwg2dxf'),
-    '/opt/homebrew/bin/dwg2dxf',
-    '/usr/local/bin/dwg2dxf',
-  ];
-  return candidates.find((p) => p && fs.existsSync(p)) || null;
+// dwg2dxf-safe(native/): 프록시 엔티티에서 dwg2dxf가 죽는 문제를 피하고 프록시 그래픽을 그려 준다.
+// 없으면 LibreDWG 기본 dwg2dxf로 대신한다.
+function findConverter() {
+  const res = process.resourcesPath || '';
+  const safe = [path.join(res, 'bin', 'dwg2dxf-safe'), path.join(__dirname, 'native', 'dwg2dxf-safe')];
+  const s = safe.find((p) => fs.existsSync(p));
+  if (s) return { bin: s, args: (inp, out) => [inp, out] };
+  const plain = [path.join(res, 'bin', 'dwg2dxf'), '/opt/homebrew/bin/dwg2dxf', '/usr/local/bin/dwg2dxf'];
+  const p = plain.find((x) => x && fs.existsSync(x));
+  return p ? { bin: p, args: (inp, out) => ['-y', '-o', out, inp] } : null;
 }
+
+// DXF 끝에 "0 / EOF"가 있어야 끝까지 쓰인 것이다. 변환기가 도중에 죽으면 뒷부분이 잘린다.
+function dxfComplete(file) {
+  const st = fs.statSync(file);
+  const n = Math.min(64, st.size);
+  const buf = Buffer.alloc(n);
+  const fd = fs.openSync(file, 'r');
+  fs.readSync(fd, buf, 0, n, st.size - n);
+  fs.closeSync(fd);
+  return /(^|\n)\s*0\r?\nEOF\s*$/.test(buf.toString('latin1'));
+}
+
+const TRUNCATED_NOTE = '이 도면은 변환 도중 오류가 나서 일부 객체가 빠졌을 수 있습니다. 오토캐드와 대조해 확인해 주세요.';
 
 function convertDwg(dwgPath) {
   return new Promise((resolve, reject) => {
-    const bin = findDwg2dxf();
-    if (!bin) {
+    const conv = findConverter();
+    if (!conv) {
       reject(new Error('DWG 변환기(dwg2dxf)가 없습니다.\n터미널에서 brew install libredwg 를 실행해 주세요.'));
       return;
     }
     const st = fs.statSync(dwgPath);
-    const key = crypto.createHash('sha1').update(`${dwgPath}|${st.size}|${st.mtimeMs}|v1`).digest('hex');
+    // v2: 잘린 변환 결과를 캐시해 두던 v1 캐시는 쓰지 않는다
+    const key = crypto.createHash('sha1').update(`${dwgPath}|${st.size}|${st.mtimeMs}|v2`).digest('hex');
     const out = path.join(CACHE_DIR, key + '.dxf');
+    const partial = path.join(CACHE_DIR, key + '.partial.dxf');
     if (fs.existsSync(out) && fs.statSync(out).size > 0) {
-      resolve(out);
+      resolve({ file: out, warning: null });
+      return;
+    }
+    if (fs.existsSync(partial) && fs.statSync(partial).size > 0) {
+      resolve({ file: partial, warning: TRUNCATED_NOTE });
       return;
     }
     const tmp = out + '.tmp.dxf';
-    execFile(bin, ['-y', '-o', tmp, dwgPath], { timeout: 180000, maxBuffer: 256 * 1024 * 1024 }, (err) => {
-      // LibreDWG는 경고만 있어도 비정상 종료코드를 낼 수 있어 결과 파일 존재 여부로 판단한다.
-      if (fs.existsSync(tmp) && fs.statSync(tmp).size > 0) {
-        fs.renameSync(tmp, out);
-        resolve(out);
-      } else {
+    execFile(conv.bin, conv.args(dwgPath, tmp), { timeout: 180000, maxBuffer: 256 * 1024 * 1024 }, (err) => {
+      // LibreDWG는 경고만 있어도 비정상 종료코드를 낼 수 있어 결과 파일로 판단한다.
+      if (!fs.existsSync(tmp) || fs.statSync(tmp).size === 0) {
         reject(new Error('DWG 변환 실패: ' + (err ? err.message : '출력 없음')));
+        return;
+      }
+      if (dxfComplete(tmp)) {
+        fs.renameSync(tmp, out);
+        resolve({ file: out, warning: null });
+      } else {
+        // 잘린 결과라도 보여 주되, 경고를 붙이고 정상 캐시와 구분해 둔다
+        fs.renameSync(tmp, partial);
+        resolve({ file: partial, warning: TRUNCATED_NOTE });
       }
     });
   });
@@ -66,10 +94,11 @@ function pruneCache() {
 async function loadDrawing(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   let dxfPath = filePath;
-  if (ext === '.dwg') dxfPath = await convertDwg(filePath);
+  let warning = null;
+  if (ext === '.dwg') ({ file: dxfPath, warning } = await convertDwg(filePath));
   else if (ext !== '.dxf') throw new Error('DWG 또는 DXF 파일만 열 수 있습니다.');
   const data = fs.readFileSync(dxfPath);
-  return { path: filePath, name: path.basename(filePath), data };
+  return { path: filePath, name: path.basename(filePath), data, warning };
 }
 
 // ───────────────────────── XREF 경로 찾기 ─────────────────────────
@@ -277,7 +306,7 @@ ipcMain.handle('save-png', async (_e, dataUrl, suggested) => {
   shell.showItemInFolder(r.filePath);
   return r.filePath;
 });
-ipcMain.handle('check-converter', () => !!findDwg2dxf());
+ipcMain.handle('check-converter', () => !!findConverter());
 
 // ── CTB 플롯 스타일: 사용자가 고른 파일을 앱 보관함에 복사하고 선택을 기억한다 ──
 function readCtbState() {

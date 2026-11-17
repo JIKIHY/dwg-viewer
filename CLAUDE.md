@@ -1,8 +1,9 @@
 # DWG 뷰어 (Mac, Electron)
 
-DWG/DXF 뷰어. DWG는 LibreDWG `dwg2dxf`로 DXF 변환 후 직접 해석·표시한다. 응답·주석은 한국어 존댓말.
+DWG/DXF 뷰어. DWG는 LibreDWG로 DXF 변환 후 직접 해석·표시한다. 응답·주석은 한국어 존댓말.
 
 ## 구조
+- `native/dwg2dxf-safe.c` — 기본 변환기. LibreDWG 0.14 `dwg2dxf`는 ACAD_PROXY_ENTITY(철근 설계 프로그램 등 플러그인 객체)를 DXF로 쓰다 세그폴트로 죽어 뒷부분(나머지 엔티티·OBJECTS의 XCLIP)이 잘린다. 이 변환기는 프록시를 건너뛰고 프록시 그래픽의 선·원·호·문자를 일반 엔티티로 ENTITIES 끝에 넣는다. 없으면 `dwg2dxf`로 대신하고, DXF 끝에 EOF가 없으면 잘린 결과로 보고 경고한다 (캐시 키 v2)
 - `main.js` — 메인 프로세스: 파일 열기(도면 하나 = macOS 네이티브 탭 하나, `winPaths`로 중복 열기 방지), DWG→DXF 변환·캐시(`~/Library/Application Support/DWG 뷰어/dxf-cache`), XREF 경로 탐색, 메뉴, 인쇄(PDF/프린터), CTB 보관함 IPC
 - `preload.js` — `window.api` 브리지
 - `renderer/dxf.js` — DXF 파서 (HEADER/TABLES/BLOCKS/ENTITIES/OBJECTS의 XCLIP). 깨진 UTF-8 줄만 CP949로 재해석
